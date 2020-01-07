@@ -8,11 +8,10 @@ import numpy as np
 import pygame
 
 import pandas as pd
-import seaborn as sns
 import matplotlib.pyplot as plt
 
 # TODO: use rect everywhere
-# TODO: only recompute patterns from modified rect 
+# TODO: only recompute patterns from modified rect
 class Rect:
     def __init__(self, x, y, w, h):
         self.x1 = x
@@ -23,7 +22,7 @@ class Rect:
         self.y2 = y + h
 
     def get_center(self):
-        return ((int)((self.x1 + self.x2)/2), (int)((self.y1 + self.y2)/2))
+        return ((int)((self.x1 + self.x2) / 2), (int)((self.y1 + self.y2) / 2))
 
     def intersect(self, other_rect):
         return (self.x1 <= other_rect.x2 and self.x2 >= other_rect.x1 and
@@ -32,7 +31,15 @@ class Rect:
 class Patch:
     def __init__(self, contents, top_left):
         self.contents = contents
-        # TODO: add rect
+        self.dimensions = self.rect_from_top_left(top_left, contents.shape)
+
+    def rect_from_top_left(self, top_left, content_size):
+        x = top_left[0]
+        y = top_left[1]
+        w = content_size[1]
+        h = content_size[0]
+        rect = Rect(x, y, w, h)
+        return rect
 
 
 class BinaryTextureSimulatedAnneling:
@@ -47,7 +54,7 @@ class BinaryTextureSimulatedAnneling:
         self.path = path
         if path:
             self.import_image(path)
-        
+
         self.base_image_patches = {}
 
         self.initial_temp = initial_temp
@@ -64,9 +71,7 @@ class BinaryTextureSimulatedAnneling:
         self.base_texture = np.asarray(self.base_texture).copy()
         self.base_texture[self.base_texture > 1] = 1
 
-    def create_random_rect(self):
-        block_size = rn.randint(2, min(self.img_size) - 1)
-
+    def create_random_rect(self, block_size):
         y_ori = rn.randint(0, self.img_size[0] - block_size - 1)
         x_ori = rn.randint(0, self.img_size[1] - block_size - 1)
 
@@ -78,20 +83,30 @@ class BinaryTextureSimulatedAnneling:
         self.generated_texture_last_iter = self.generated_texture.copy()
 
     def modify_texture(self):
+        # TODO: if selected zone bigger than size, trim it
         self.generated_texture_last_iter = self.generated_texture.copy()
 
-        #TODO: use create_random_rect()
         block_size = rn.randint(2, min(self.img_size) - 1)
+        input_zone = self.create_random_rect(block_size)
 
-        y_ori = rn.randint(0, self.img_size[0] - block_size - 1)
-        x_ori = rn.randint(0, self.img_size[1] - block_size - 1)
+        x_origin_range = slice(input_zone.x1, input_zone.x1 + input_zone.w - 1)
+        y_origin_range = slice(input_zone.y1, input_zone.y1 + input_zone.h - 1)
 
         y_dest = rn.randint(0, self.generated_texture.shape[0] - block_size - 1)
         x_dest = rn.randint(0, self.generated_texture.shape[1] - block_size - 1)
 
-        self.generated_texture[y_dest : y_dest + block_size - 1,
-                               x_dest : x_dest + block_size - 1] = self.base_texture[y_ori : y_ori + block_size - 1,
-                                                                                     x_ori : x_ori + block_size - 1]
+        y_dest_range = slice(y_dest, y_dest + block_size - 1)
+        x_dest_range = slice(x_dest, x_dest + block_size - 1)
+
+        self.generated_texture[y_dest_range,
+                               x_dest_range] = self.base_texture[y_origin_range,
+                                                                 x_origin_range]
+
+        dest_rect = Rect(x_dest, y_dest,
+                         x_dest + block_size - 1,
+                         y_dest + block_size - 1)
+
+        return dest_rect
 
     def get_base_image_patches(self, block_size):
         """
@@ -102,56 +117,68 @@ class BinaryTextureSimulatedAnneling:
 
         for y in range(0, self.img_size[0] - block_size):
             for x in range(0, self.img_size[1] - block_size):
-                sub_matrix = self.base_texture[y : y + block_size, x : x + block_size]
+                sub_matrix = self.base_texture[y: y + block_size, x: x + block_size]
 
                 found = False
 
                 for patch in base_image_patches:
-                    if (sub_matrix == patch).all():
+                    if (sub_matrix == patch.contents).all():
                         found = True
                         break
-                
+
                 if not found:
-                    base_image_patches.append(sub_matrix)
+                    base_image_patches.append(Patch(sub_matrix, (x, y)))
 
         self.base_image_patches[block_size] = base_image_patches
 
-    def get_all_patches(self, block_size):
+    def get_all_patches(self, block_size, dest_rect):
         all_patches = self.base_image_patches[block_size].copy()
+
+        # if dest_rect:
+        #     # TODO:
+        #     # - delete all patches which intersect with dest_rect
+        #     # - re-create and recompute blocks that intersect with dest_rect
+        #     pass
+
+
 
         for y in range(0, self.generated_texture.shape[0] - block_size):
             for x in range(0, self.generated_texture.shape[1] - block_size):
-                sub_matrix = self.generated_texture[y : y + block_size, x : x + block_size]
+                sub_matrix = self.generated_texture[y: y + block_size, x: x + block_size]
 
                 found = False
 
                 for patch in all_patches:
-                    if (sub_matrix == patch).all():
+                    if (sub_matrix == patch.contents).all():
                         found = True
                         break
-                
+
                 if not found:
-                    all_patches.append(sub_matrix)
+                    all_patches.append(Patch(sub_matrix, (x, y)))
 
         return all_patches
 
     def find_matrix_index_in_list(self, matrix, lst):
         for i, lst_mat in enumerate(lst):
-            if np.array_equal(lst_mat, matrix):
+            if np.array_equal(lst_mat.contents, matrix):
                 return i
 
         return -1
 
 
-    def get_patches_occurences(self, block_size):
-        all_patches = self.get_all_patches(block_size)
+    def get_patches_occurences(self, block_size, dest_rect):
+        all_patches = self.get_all_patches(block_size, dest_rect)
 
         original_texture_patches_occurences = {k: 0 for k, _ in enumerate(all_patches)}
         generated_texture_patches_occurences = {k: 0 for k, _ in enumerate(all_patches)}
 
         for y in range(0, self.img_size[0] - block_size):
             for x in range(0, self.img_size[1] - block_size):
-                sub_matrix = self.base_texture[y : y + block_size, x : x + block_size]
+                x_range = slice(x, x + block_size)
+                y_range = slice(y, y + block_size)
+
+
+                sub_matrix = self.base_texture[y_range, x_range]
                 idx = self.find_matrix_index_in_list(sub_matrix, all_patches)
                 original_texture_patches_occurences[idx] += 1
 
@@ -159,11 +186,14 @@ class BinaryTextureSimulatedAnneling:
 
         for k in original_texture_patches_occurences.keys():
             original_texture_patches_occurences[k] /= summ
-        
+
 
         for y in range(0, self.generated_texture.shape[0] - block_size):
             for x in range(0, self.generated_texture.shape[1] - block_size):
-                sub_matrix = self.generated_texture[y : y + block_size, x : x + block_size]
+                x_range = slice(x, x + block_size)
+                y_range = slice(y, y + block_size)
+
+                sub_matrix = self.generated_texture[y_range, x_range]
                 idx = self.find_matrix_index_in_list(sub_matrix, all_patches)
                 generated_texture_patches_occurences[idx] += 1
 
@@ -171,12 +201,12 @@ class BinaryTextureSimulatedAnneling:
 
         for k in generated_texture_patches_occurences.keys():
             generated_texture_patches_occurences[k] /= summ
-                
-        return zip(list(original_texture_patches_occurences.values()), 
+
+        return zip(list(original_texture_patches_occurences.values()),
                    list(generated_texture_patches_occurences.values()))
 
-    def one_pass_energy(self, block_size):
-        patches_occurences = self.get_patches_occurences(block_size)
+    def one_pass_energy(self, block_size, dest_rect):
+        patches_occurences = self.get_patches_occurences(block_size, dest_rect)
 
         if self.dst_func == 'l1':
             return sum([abs(v[0] - v[1]) for v in patches_occurences])
@@ -186,11 +216,11 @@ class BinaryTextureSimulatedAnneling:
 
 
 
-    def compute_energy(self):
+    def compute_energy(self, dest_rect=None):
         energy = 0
         for bs in range(self.min_block_size, self.max_block_size + 1):
-            energy += self.one_pass_energy(bs)
-            
+            energy += self.one_pass_energy(bs, dest_rect)
+
         return energy
 
     def init(self):
@@ -201,24 +231,29 @@ class BinaryTextureSimulatedAnneling:
         energy_values = []
         delta_energy_values = []
         temperatures_values = []
+        probability_values = []
 
-        energy_threshold = 0.001
-        temp_threshold = 0.0000000000000001
+        energy_threshold = 1e-3
+        temp_threshold = 1e-16
+        temp_multiplier = 0.999
 
         pygame.init()
         screen = pygame.display.set_mode((self.generated_texture.shape[0] * 10, self.generated_texture.shape[1] * 10))
         pygame.display.set_caption("Serious Work - not games")
         done = False
 
+        after_energy = sys.maxsize
+
         while not done:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     done = True
 
-            before_energy = self.compute_energy()
-            self.modify_texture()
+            # Trick so that we don't compute energy two times
+            before_energy = after_energy
+            dest_rect = self.modify_texture()
 
-            # Clear screen to white before drawing 
+            # Clear screen to white before drawing
             screen.fill((255, 255, 255))
             new_array = self.generated_texture * 255
             surface = pygame.surfarray.make_surface(new_array)
@@ -226,40 +261,38 @@ class BinaryTextureSimulatedAnneling:
             screen.blit(surface, (0, 0))
             pygame.display.flip()
 
-            after_energy = self.compute_energy()
+            after_energy = self.compute_energy(dest_rect)
 
             try:
                 probability = exp(-(after_energy - before_energy) / self.current_temp)
             except OverflowError:
                 probability = -1
 
+            probability_values.append(probability)
+            energy_values.append(after_energy)
+
+            if not delta_energy_values:
+                delta_energy_values.append(after_energy - before_energy)
+            else:
+                delta_energy_values.append(delta_energy_values[-1] + (after_energy - before_energy))
+
             print(f'E(b) = {before_energy:.5f}, E(a) = {after_energy:.5f}, d(E) = {after_energy - before_energy:.5f}', end='')
-            
 
             if after_energy - before_energy > 0:
                 # Refusing changes
                 print(f', probability: {probability:.5f}')
-                if exp(-(after_energy - before_energy) / self.current_temp) < rn.random():
+                if probability < rn.random():
                     self.generated_texture = self.generated_texture_last_iter.copy()
-                else:
-                    energy_values.append(after_energy)
-                    if not delta_energy_values:
-                        delta_energy_values.append(after_energy - before_energy)
-                    else:
-                        delta_energy_values.append(delta_energy_values[-1] + (after_energy - before_energy))
+                # else:
+                #     temp_multiplier *= 0.99
 
-            
             else:
                 print(f', probability: accept')
-                energy_values.append(after_energy)
-                if not delta_energy_values:
-                    delta_energy_values.append(after_energy - before_energy)
-                else:
-                    delta_energy_values.append(delta_energy_values[-1] + (after_energy - before_energy))
 
-            self.current_temp = self.current_temp * 0.99
-            print(f'Current temp: {self.current_temp}')
-            
+
+            print(f'Current temp: {self.current_temp} temp mult: {temp_multiplier:.2f}')
+
+            self.current_temp *= temp_multiplier
             temperatures_values.append(self.current_temp)
 
             if after_energy < energy_threshold:
@@ -275,27 +308,29 @@ class BinaryTextureSimulatedAnneling:
 
         df = pd.DataFrame({'iterations': [i for i in range(len(energy_values))],
                            'energy': energy_values,
-                           'cumulative delta energy': delta_energy_values})
+                           'cumulative delta energy': delta_energy_values,
+                           'probability of acceptation': probability_values})
 
-        
+
         ax = df.plot(x="iterations", y="energy", legend=False)
         ax2 = ax.twinx()
-        var = (max(delta_energy_values) - min(delta_energy_values)) * 5
-        ax2.set_ylim(np.mean(delta_energy_values) - var, np.mean(delta_energy_values) + var)
+        #var = (max(delta_energy_values) - min(delta_energy_values)) * 5
+        #ax2.set_ylim(-1, 2)
         df.plot(x="iterations", y="cumulative delta energy", ax=ax2, legend=False, color="r")
         ax.figure.legend()
         plt.show()
         fig = ax2.get_figure()
         fig.savefig('energy_graph.png')
 
-        
+
 
 def main():
     bt = BinaryTextureSimulatedAnneling(r'../test3.png', min_block_size=1, max_block_size=4,
                                         dst_func='l2')
-    bt.create_base_generated_texture([32,32])
+    bt.create_base_generated_texture([32, 16])
     bt.init()
     bt.main_loop()
+
 
 if __name__ == '__main__':
     main()
