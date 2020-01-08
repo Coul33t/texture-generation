@@ -235,7 +235,7 @@ class BinaryTextureSimulatedAnneling:
 
         energy_threshold = 1e-3
         temp_threshold = 1e-16
-        temp_multiplier = 0.999
+        temp_multiplier = 0.99
 
         pygame.init()
         screen = pygame.display.set_mode((self.generated_texture.shape[0] * 10, self.generated_texture.shape[1] * 10))
@@ -278,7 +278,7 @@ class BinaryTextureSimulatedAnneling:
 
             print(f'E(b) = {before_energy:.5f}, E(a) = {after_energy:.5f}, d(E) = {after_energy - before_energy:.5f}', end='')
 
-            if after_energy - before_energy > 0:
+            if after_energy - before_energy >= 0:
                 # Refusing changes
                 print(f', probability: {probability:.5f}')
                 if probability < rn.random():
@@ -325,9 +325,9 @@ class BinaryTextureSimulatedAnneling:
 
 
 def main():
-    bt = BinaryTextureSimulatedAnneling(r'../test3.png', min_block_size=1, max_block_size=4,
+    bt = BinaryTextureSimulatedAnneling(r'../test4.png', min_block_size=4, max_block_size=4,
                                         dst_func='l2')
-    bt.create_base_generated_texture([32, 16])
+    bt.create_base_generated_texture([32, 32])
     bt.init()
     bt.main_loop()
 
